@@ -264,7 +264,7 @@ static void* get_key(void* addr, int pid, unsigned long *offset, int* line)
 
 	spin_lock(&gpu_listlock);
 
-	list_for_each(pos, &(gpu_mappings_list.list))
+	list_for_each(pos, &(gpu_mappings_list.list)) // 遍历每个链表项，结果保存到pos
 	{
 		unsigned long gpu_virt;
 		unsigned long addr_ul;
@@ -505,18 +505,26 @@ static struct mmu_notifier notify = {
 	.ops = &no_ops,
 };
 
+/**
+ * @description: 将虚拟地址转换为物理地址 返回该段虚拟地址长度、起始地址和起始地址所在的物理页号
+ * @return {*}
+ * @param {void*} addr_virt：输入参数，虚拟地址
+ * @param {struct mm_struct*} mm：当前进程的mm_struct
+ * @param {unsigned long *} length：返回参数，虚拟地址所属虚拟段的长度
+ * @param {void**} virt_start：返回参数，虚拟地址所属虚拟段起始地址
+ */
 static void* translate_virt(void* addr_virt, struct mm_struct *mm,
 	unsigned long * length, void** virt_start)
 {
 	struct vm_area_struct *vma = NULL;
 	unsigned long pfn;
 	if (addr_virt) {
-		vma = find_vma(mm, (unsigned long) (addr_virt));
-		if (!vma || !(vma->vm_flags & VM_PFNMAP)) {
+		vma = find_vma(mm, (unsigned long) (addr_virt)); // 在当前进程vma中寻找传入的虚拟地址
+		if (!vma || !(vma->vm_flags & VM_PFNMAP)) { // 未找到或未设置VM_PFNMAP（表示直接映射物理内存，无页结构）
 			return NULL;
 		}
 
-		if (follow_pfn(vma, (unsigned long) (vma->vm_start), &pfn)) {
+		if (follow_pfn(vma, (unsigned long) (vma->vm_start), &pfn)) { // 获取 vma起始地址 对应的物理页号
 			return NULL;
 		}
 
@@ -632,6 +640,17 @@ static void * add_gpu_mapping(void* addr_virt, void* addr_phys,
 	return tempret;
 }
 
+/**
+ * @description: 利用ring buffer将指定字节数读取到目标位置
+ * @return {*}
+ * @param {fd} f 待读取文件
+ * @param {void*} dest 目标内存地址（待读取）
+ * @param {size_t} sizeBytes 读取总字节数
+ * @param {off_t} offset 数据起始偏移量
+ * @param {void*} m_destKey
+ * @param {int} line
+ * @param {void} *m_pDBuffer
+ */
 static ssize_t ring_read(struct fd f, void* dest, size_t sizeBytes, off_t offset,
 	void* m_destKey, int line, void *m_pDBuffer)
 {
@@ -643,8 +662,8 @@ static ssize_t ring_read(struct fd f, void* dest, size_t sizeBytes, off_t offset
 	}
 
 	while (sizeBytes > 0) {
-		unsigned long destPage = (unsigned long) dest & ((unsigned long) (~0xFFF));
-		unsigned long destOffset = (unsigned long) dest & ((unsigned long) 0xFFF);
+		unsigned long destPage = (unsigned long) dest & ((unsigned long) (~0xFFF)); // 清除页内偏移量，得到页号
+		unsigned long destOffset = (unsigned long) dest & ((unsigned long) 0xFFF); // 偏移量
 		int readSize;
 		long readSizeBytes = sizeBytes; //This iterations read size
 		int rett, j;
@@ -653,11 +672,11 @@ static ssize_t ring_read(struct fd f, void* dest, size_t sizeBytes, off_t offset
 			readSizeBytes = m_ringSize * 4096 - destOffset;
 		}
 
-		if (sizeBytes - readSizeBytes < 512 && sizeBytes - readSizeBytes > 0) {
+		if (sizeBytes - readSizeBytes < 512 && sizeBytes - readSizeBytes > 0) { // 跳过非完整块
 			continue;
 		}
 
-		readSize = DIV_ROUND_UP(readSizeBytes + destOffset, 4096);
+		readSize = DIV_ROUND_UP(readSizeBytes + destOffset, 4096); // 本次读取的页面数
 
 		for (j = 0; j < readSize; ++j) {
 			*((unsigned long long*) (void*) (unsigned long)
@@ -686,12 +705,26 @@ static ssize_t ring_read(struct fd f, void* dest, size_t sizeBytes, off_t offset
 	return(ssize_t) origSize;
 }
 
+/**
+ * @description: 根据输入参数和ubuffer状态选择ring_read/my_read
+ * @return {*}
+ * @param {fd} f
+ * @param {void} *buf
+ * @param {size_t} count: 要读取的总字节数
+ * @param {off_t} offset
+ * @param {void*} key_return
+ * @param {int} line
+ * @param {unsigned long} ubuffer_size
+ * @param {int*} ubuffer
+ * @param {unsigned long} offset_return
+ * @param {void*} m_pDBuffer
+ */
 static ssize_t prep_ring_read(struct fd f, void *buf, size_t count, off_t offset,
 	void* key_return, int line, unsigned long ubuffer_size, int* ubuffer,
 	unsigned long offset_return, void* m_pDBuffer)
 {
 	unsigned long lastp, currp, startp;
-	unsigned int sstate, j, cons;
+	unsigned int sstate, j, cons; // cons标记连续有效块数？
 	int ret;
 
 	lastp = 0;
@@ -779,10 +812,10 @@ ssize_t cusread(struct file * f, char __user * u, size_t s, loff_t *o)
 	if (f->f_inode->i_private != NULL) {
 		spin_lock(&caches_lru_listlock);
 		rtr = &(((struct fd_priv *) (f->f_inode->i_private))->mypc_tree);
-		res = radix_tree_gang_lookup(rtr, (void**) &tree_l, base_off, 1);
+		res = radix_tree_gang_lookup(rtr, (void**) &tree_l, base_off, 1); // 查询第一个index >= base_off的页面，结果放到tree_l
 		if (res) {
 			if (res == 1 && tree_l->offset < base_off + num_pages) {
-				remove_from_rt(rtr, tree_l->length, tree_l->offset);
+				remove_from_rt(rtr, tree_l->length, tree_l->offset); // 好像对应论文GPU RA部分移除的逻辑
 				list_del(&(tree_l->list));
 				kfree(tree_l);
 			}
@@ -881,6 +914,7 @@ static long spindrv_ioctl(struct file *file, unsigned int ioctl_num, unsigned lo
 
 	case SPIN_IOCTL_READ:
 	{
+		printk("entering case SPIN_IOCTL_READ!\n");
 		void* gpu_addr_phys, *virt_start, *key_return;
 		unsigned long gpu_length, offset_return, ubuffer_size;
 		int line, perinPC;
@@ -890,6 +924,7 @@ static long spindrv_ioctl(struct file *file, unsigned int ioctl_num, unsigned lo
 		f = fdget(local_param.readArgs.fd);
 		if (f.file) {
 			do {
+				// 计算好像有问题 应为DIV_ROUND_UP(~.count + ~.offset, 4096) - ~.offset % 4096
 				ubuffer_size = DIV_ROUND_UP(local_param.readArgs.count + (local_param.readArgs.offset % 4096), 4096);
 				ubuffer = (int *) kzalloc(ubuffer_size * sizeof(int), GFP_KERNEL);
 				perinPC = get_mypc(f, local_param.readArgs.count, local_param.readArgs.offset, ubuffer);
@@ -967,18 +1002,18 @@ static long spindrv_ioctl(struct file *file, unsigned int ioctl_num, unsigned lo
 					if (local_param.readArgs.count < RAV && local_param.readArgs.offset <= ((struct fd_priv *) (f.file->private_data))->last_offset &&
 						((struct fd_priv *) (f.file->private_data))->last_offset <= local_param.readArgs.offset + local_param.readArgs.count) {
 
-						if (!disable_ra_pc) {
+						if (!disable_ra_pc) { // 支持readahead page cache
 							int p_iter;
 							unsigned long base_off;
 							unsigned long num_pages;
 							struct cache_lru * tree_l = NULL;
 							struct radix_tree_root * rtr;
 							struct cache_lru * cur_cache;
-							base_off = local_param.readArgs.offset / 4096;
-							num_pages = DIV_ROUND_UP(local_param.readArgs.count, 4096);
+							base_off = local_param.readArgs.offset / 4096; // 偏移量位于文件哪一页
+							num_pages = DIV_ROUND_UP(local_param.readArgs.count, 4096); // 总页数
 							rtr = &(((struct fd_priv *) (f.file->private_data))->mypc_tree);
 							spin_lock(&caches_lru_listlock);
-							tree_l = (struct cache_lru *) radix_tree_lookup(rtr, base_off);
+							tree_l = (struct cache_lru *) radix_tree_lookup(rtr, base_off); // 查看该页是否已经位于缓存
 							if (tree_l) {
 
 							} else {
@@ -992,7 +1027,7 @@ static long spindrv_ioctl(struct file *file, unsigned int ioctl_num, unsigned lo
 									cur_cache->length += num_pages;
 								}
 
-								for (p_iter = 0; p_iter < num_pages; p_iter++) {
+								for (p_iter = 0; p_iter < num_pages; p_iter++) { // 全部插入ra cache
 									radix_tree_insert(rtr, base_off + p_iter, cur_cache);
 								}
 								curr_pc += num_pages;
