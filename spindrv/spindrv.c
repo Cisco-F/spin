@@ -923,6 +923,7 @@ static long spindrv_ioctl(struct file *file, unsigned int ioctl_num, unsigned lo
 		line = 0;
 		f = fdget(local_param.readArgs.fd);
 		if (f.file) {
+			printk("f.file exists!\n");
 			do {
 				// 计算好像有问题 应为DIV_ROUND_UP(~.count + ~.offset, 4096) - ~.offset % 4096
 				ubuffer_size = DIV_ROUND_UP(local_param.readArgs.count + (local_param.readArgs.offset % 4096), 4096);
@@ -978,6 +979,7 @@ static long spindrv_ioctl(struct file *file, unsigned int ioctl_num, unsigned lo
 				}
 
 				if ((unsigned long) (f.file->private_data) == 1) {
+					printk("f.file->private_data = 1\n");
 					local_param.readArgs.read_return = my_read(f, local_param.readArgs.buf,
 						local_param.readArgs.count,
 						local_param.readArgs.offset, 0);
@@ -993,6 +995,7 @@ static long spindrv_ioctl(struct file *file, unsigned int ioctl_num, unsigned lo
 			key_return = get_key(local_param.readArgs.buf, current->pid, &(offset_return), &(line));
 
 			if (key_return) {
+				printk("key_return get! key is %ld\n", (unsigned long)key_return);
 				spin_unlock(&checklock);
 
 				if (only_p2p) {
